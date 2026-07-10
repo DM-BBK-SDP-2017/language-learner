@@ -154,6 +154,16 @@ test('Sentence Radio autoplay advances without changing frequency', () => {
   assert.doesNotMatch(endedSource, /'more'|'less'/);
 });
 
+test('Sentence Radio hear more and less continue playback when auto-play is enabled', () => {
+  const source = readFileSync(new URL('./worker.js', import.meta.url), 'utf8');
+  assert.match(source, /function shouldContinueListeningPlayback\(\)/);
+  const start = source.indexOf("els.previousListeningBtn.addEventListener('click'");
+  const end = source.indexOf("els.playPauseListeningBtn.addEventListener('click'", start);
+  const buttonSource = source.slice(start, end);
+  assert.match(buttonSource, /moveListening\(-1, shouldContinueListeningPlayback\(\), 'less'\)/);
+  assert.match(buttonSource, /moveListening\(1, shouldContinueListeningPlayback\(\), 'more'\)/);
+});
+
 test('background image polling does not reset the active flashcard session', () => {
   const source = readFileSync(new URL('./worker.js', import.meta.url), 'utf8');
   const pollStart = source.indexOf('function scheduleImageRefresh()');

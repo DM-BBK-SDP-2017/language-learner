@@ -4578,6 +4578,10 @@ const APP_JS = String.raw`
     return Number(Math.min(5, Math.max(0.2, Number(value) || 1))).toFixed(2).replace(/\.00$/, '').replace(/0$/, '') + '×';
   }
 
+  function shouldContinueListeningPlayback() {
+    return Boolean(els.continuousListeningInput.checked) || (!els.listeningAudio.paused && !els.listeningAudio.ended);
+  }
+
   function moveListening(direction, autoplay, feedback) {
     window.clearTimeout(state.listeningGapTimer);
     const current = state.listeningSentences[state.listeningIndex];
@@ -5708,10 +5712,10 @@ const APP_JS = String.raw`
     });
     els.generateListeningBtn.addEventListener('click', function () { generateListeningBatch(false); });
     els.previousListeningBtn.addEventListener('click', function () {
-      moveListening(-1, !els.listeningAudio.paused && !els.listeningAudio.ended, 'less');
+      moveListening(-1, shouldContinueListeningPlayback(), 'less');
     });
     els.nextListeningBtn.addEventListener('click', function () {
-      moveListening(1, !els.listeningAudio.paused && !els.listeningAudio.ended, 'more');
+      moveListening(1, shouldContinueListeningPlayback(), 'more');
     });
     els.playPauseListeningBtn.addEventListener('click', toggleListeningPlayback);
     els.replayListeningBtn.addEventListener('click', function () {
@@ -5873,7 +5877,7 @@ const APP_JS = String.raw`
       if (state.tab === 'listening' && els.listeningCheckin.classList.contains('hidden')) {
         const tagName = String(event.target && event.target.tagName || '').toLowerCase();
         if (!['input', 'select', 'textarea'].includes(tagName)) {
-          const shouldResume = !els.listeningAudio.paused && !els.listeningAudio.ended;
+          const shouldResume = shouldContinueListeningPlayback();
           if (event.key === 'ArrowLeft') {
             event.preventDefault();
             moveListening(-1, shouldResume, 'less');
