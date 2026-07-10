@@ -119,9 +119,39 @@ test('Sentence Radio keyboard shortcuts support less, more, and play pause', () 
   const start = source.indexOf("if (state.tab === 'listening'");
   const end = source.indexOf("if (state.tab !== 'flashcards'", start);
   const shortcutSource = source.slice(start, end);
-  assert.match(shortcutSource, /ArrowLeft[\s\S]*moveListening\(-1, shouldResume\)/);
-  assert.match(shortcutSource, /ArrowRight[\s\S]*moveListening\(1, shouldResume\)/);
+  assert.match(shortcutSource, /ArrowLeft[\s\S]*moveListening\(-1, shouldResume, 'less'\)/);
+  assert.match(shortcutSource, /ArrowRight[\s\S]*moveListening\(1, shouldResume, 'more'\)/);
+  assert.match(shortcutSource, /ArrowUp[\s\S]*toggleCurrentListeningSentenceVisibility/);
+  assert.match(shortcutSource, /ArrowDown[\s\S]*toggleListeningTranslation\(\)/);
   assert.match(shortcutSource, /event\.key === ' '[\s\S]*toggleListeningPlayback\(\)/);
+});
+
+test('Sentence Radio persists frequency and displays it in the library', () => {
+  const source = readFileSync(new URL('./worker.js', import.meta.url), 'utf8');
+  assert.match(source, /listening_frequency REAL NOT NULL DEFAULT 1/);
+  assert.match(source, /\/frequency/);
+  assert.match(source, /function updateListeningFrequency/);
+  assert.match(source, /frequency ' \+ formatListeningFrequency\(item\.frequency\)/);
+});
+
+test('Sentence Radio selection scores include frequency, recency, and listen count', () => {
+  const source = readFileSync(new URL('./worker.js', import.meta.url), 'utf8');
+  const start = source.indexOf('function listeningSelectionScore(item)');
+  const end = source.indexOf('\n  function chooseWeightedListeningIndex', start);
+  const scoreSource = source.slice(start, end);
+  assert.match(scoreSource, /frequency/);
+  assert.match(scoreSource, /listenPenalty/);
+  assert.match(scoreSource, /newnessBoost/);
+  assert.match(scoreSource, /getSentenceAgeHours/);
+});
+
+test('Sentence Radio autoplay advances without changing frequency', () => {
+  const source = readFileSync(new URL('./worker.js', import.meta.url), 'utf8');
+  const start = source.indexOf('function handleListeningEnded()');
+  const end = source.indexOf('\n  async function recordCurrentListeningCompletion', start);
+  const endedSource = source.slice(start, end);
+  assert.match(endedSource, /moveListening\(1, true\)/);
+  assert.doesNotMatch(endedSource, /'more'|'less'/);
 });
 
 test('background image polling does not reset the active flashcard session', () => {

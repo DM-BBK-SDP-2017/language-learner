@@ -120,6 +120,13 @@ export default {
         return json({ listenCount: await recordListeningCompletion(env.DB, id) });
       }
 
+      if (/^\/api\/listening-sentences\/[^/]+\/frequency$/.test(url.pathname) && request.method === 'POST') {
+        const parts = url.pathname.split('/');
+        const id = decodeURIComponent(parts[3] || '');
+        const body = await request.json();
+        return json({ frequency: await updateListeningFrequency(env.DB, id, body) });
+      }
+
       if (/^\/api\/listening-sentences\/[^/]+$/.test(url.pathname) && request.method === 'DELETE') {
         const id = decodeURIComponent(url.pathname.split('/').pop() || '');
         await deleteListeningSentence(env, id);
@@ -307,6 +314,7 @@ async function ensureSchema(env) {
       voice_id TEXT NOT NULL,
       voice_name TEXT NOT NULL DEFAULT '',
       translation TEXT NOT NULL DEFAULT '',
+      listening_frequency REAL NOT NULL DEFAULT 1,
       audio_r2_key TEXT NOT NULL,
       audio_content_type TEXT NOT NULL DEFAULT 'audio/mpeg',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -371,6 +379,7 @@ async function ensureSchema(env) {
   await ensureColumn(env.DB, 'settings', 'listening_random_order', 'INTEGER NOT NULL DEFAULT 1');
   await ensureColumn(env.DB, 'listening_sentences', 'translation', "TEXT NOT NULL DEFAULT ''");
   await ensureColumn(env.DB, 'listening_sentences', 'listen_count', 'INTEGER NOT NULL DEFAULT 0');
+  await ensureColumn(env.DB, 'listening_sentences', 'listening_frequency', 'REAL NOT NULL DEFAULT 1');
 }
 
 async function ensureColumn(db, table, column, definition) {
@@ -700,13 +709,26 @@ async function listHistory(db) {
 
 async function listListeningSentences(db, language, limit = 40) {
   const rows = await db.prepare(
-    `SELECT id, batch_id, language, text, vocabulary_json, voice_id, voice_name, translation, listen_count, audio_content_type, created_at
+    `SELECT id, batch_id, language, text, vocabulary_json, voice_id, voice_name, translation, listen_count, listening_frequency, audio_content_type, created_at
      FROM listening_sentences
      WHERE language = ?
      ORDER BY datetime(created_at) ASC, rowid ASC
      LIMIT ?`
   ).bind(language, limit).all();
   return (rows.results || []).map(normalizeListeningSentence);
+}
+
+async function updateListeningFrequency(db, id, input = {}) {
+  const frequency = Math.min(5, Math.max(0.2, Number(input.frequency) || 1));
+  const result = await db.prepare(
+    'UPDATE listening_sentences SET listening_frequency = ? WHERE id = ?'
+  ).bind(frequency, id).run();
+  if (!result.meta || Number(result.meta.changes) < 1) {
+    const error = new Error('Listening sentence not found');
+    error.status = 404;
+    throw error;
+  }
+  return frequency;
 }
 
 async function recordListeningCompletion(db, id) {
@@ -874,8 +896,8 @@ async function generateListeningBatch(env, input = {}) {
 
     await env.DB.batch(synthesized.map((item) => env.DB.prepare(
       `INSERT INTO listening_sentences
-       (id, batch_id, language, text, vocabulary_json, voice_id, voice_name, translation, listen_count, audio_r2_key, audio_content_type, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       (id, batch_id, language, text, vocabulary_json, voice_id, voice_name, translation, listen_count, listening_frequency, audio_r2_key, audio_content_type, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
       item.id,
       item.batchId,
@@ -886,6 +908,7 @@ async function generateListeningBatch(env, input = {}) {
       item.voiceName,
       item.translation,
       0,
+      1,
       item.audioR2Key,
       item.audioContentType,
       item.createdAt
@@ -909,6 +932,7 @@ async function generateListeningBatch(env, input = {}) {
       voiceName: item.voiceName,
       translation: item.translation,
       listenCount: 0,
+      frequency: 1,
       audioContentType: item.audioContentType,
       audioUrl: '/api/listening-audio/' + encodeURIComponent(item.id),
       createdAt: item.createdAt
@@ -2624,13 +2648,15 @@ async function renderPage(env) {
               </button>
               <div class="listening-key-hints" aria-hidden="true">
                 <span>← less</span>
+                <span>↑ sentence</span>
                 <span>space play/pause</span>
+                <span>↓ translation</span>
                 <span>more →</span>
               </div>
             </div>
             <div class="listening-actions">
               <button id="previousListeningBtn" class="ghost-btn">← Hear less</button>
-              <button id="translateListeningBtn" class="secondary-btn">Show translation</button>
+              <button id="translateListeningBtn" class="secondary-btn" aria-pressed="false">Translation off</button>
               <button id="replayListeningBtn" class="secondary-btn">Replay</button>
               <button id="deleteListeningBtn" class="danger-btn">Delete</button>
               <button id="nextListeningBtn" class="ghost-btn">Hear more →</button>
@@ -3743,7 +3769,8 @@ const APP_JS = String.raw`
     listeningRepetition: 0,
     listeningAutoplayCount: 0,
     listeningGapTimer: 0,
-    listeningTranslationVisible: false
+    listeningTranslationVisible: false,
+    listeningSentenceVisibleOverride: false
   };
 
   const CACHE_KEY = 'language-learner-state-v1';
@@ -4381,18 +4408,18 @@ const APP_JS = String.raw`
     els.listeningCounter.textContent = hasItem
       ? (state.listeningIndex + 1) + ' / ' + state.listeningSentences.length
       : '0 / 0';
-    els.previousListeningBtn.disabled = !hasItem || state.listeningIndex <= 0;
-    els.nextListeningBtn.disabled = !hasItem || state.listeningIndex >= state.listeningSentences.length - 1;
+    els.previousListeningBtn.disabled = !hasItem || state.listeningSentences.length < 2;
+    els.nextListeningBtn.disabled = !hasItem || state.listeningSentences.length < 2;
     els.playPauseListeningBtn.disabled = !hasItem;
     els.replayListeningBtn.disabled = !hasItem;
     els.deleteListeningBtn.disabled = !hasItem;
-    els.showListeningSentenceInput.checked = Boolean(state.settings.listening_show_sentence);
+    els.showListeningSentenceInput.checked = Boolean(state.listeningSentenceVisibleOverride);
     els.randomListeningOrderInput.checked = Boolean(state.settings.listening_random_order);
     if (!hasItem) {
       els.listeningVoice.textContent = 'Ready to listen';
       els.listeningCount.textContent = '';
       els.listeningSentence.textContent = 'Generate your first listening batch.';
-      els.listeningSentence.classList.toggle('hidden', !state.settings.listening_show_sentence);
+      els.listeningSentence.classList.toggle('hidden', !state.listeningSentenceVisibleOverride);
       els.listeningTranslation.textContent = '';
       els.listeningTranslation.classList.add('hidden');
       els.translateListeningBtn.disabled = true;
@@ -4416,9 +4443,10 @@ const APP_JS = String.raw`
       if (clean && vocabWords.has(clean)) classes.push('vocab');
       return '<span class="' + classes.join(' ') + '" role="button" tabindex="0" data-word="' + escapeHtml(clean) + '">' + escapeHtml(token) + '</span>';
     }).join('');
-    els.listeningSentence.classList.toggle('hidden', !state.settings.listening_show_sentence);
+    els.listeningSentence.classList.toggle('hidden', !state.listeningSentenceVisibleOverride);
     els.translateListeningBtn.disabled = false;
-    els.translateListeningBtn.textContent = state.listeningTranslationVisible ? 'Hide translation' : 'Show translation';
+    els.translateListeningBtn.textContent = state.listeningTranslationVisible ? 'Translation on' : 'Translation off';
+    els.translateListeningBtn.setAttribute('aria-pressed', state.listeningTranslationVisible ? 'true' : 'false');
     els.listeningTranslation.textContent = item.translation || '';
     els.listeningTranslation.classList.toggle('hidden', !state.listeningTranslationVisible || !item.translation);
     els.listeningWords.textContent = item.vocabulary && item.vocabulary.length
@@ -4495,13 +4523,72 @@ const APP_JS = String.raw`
     }
   }
 
-  function moveListening(direction, autoplay) {
+  function getSentenceAgeHours(item) {
+    const timestamp = Date.parse(item && item.createdAt || '');
+    if (!Number.isFinite(timestamp)) return 72;
+    return Math.max(0, (Date.now() - timestamp) / 36e5);
+  }
+
+  function listeningSelectionScore(item) {
+    const frequency = Math.min(5, Math.max(0.2, Number(item && item.frequency) || 1));
+    const listenPenalty = 1 / Math.sqrt(Number(item && item.listenCount || 0) + 1);
+    const newnessBoost = 1 + Math.max(0, 1 - Math.min(getSentenceAgeHours(item), 168) / 168) * 1.25;
+    return Math.max(0.01, frequency * listenPenalty * newnessBoost);
+  }
+
+  function chooseWeightedListeningIndex(direction) {
+    if (state.listeningSentences.length < 2) return state.listeningIndex;
+    const currentId = state.listeningSentences[state.listeningIndex] && state.listeningSentences[state.listeningIndex].id;
+    const candidates = state.listeningSentences
+      .map(function (item, index) {
+        return { index, score: listeningSelectionScore(item), item };
+      })
+      .filter(function (entry) { return entry.item.id !== currentId; });
+    if (!candidates.length) return state.listeningIndex;
+    if (!state.settings.listening_random_order) {
+      const next = state.listeningIndex + direction;
+      if (next >= 0 && next < state.listeningSentences.length) return next;
+    }
+    const total = candidates.reduce(function (sum, entry) { return sum + entry.score; }, 0);
+    let target = Math.random() * total;
+    for (const entry of candidates) {
+      target -= entry.score;
+      if (target <= 0) return entry.index;
+    }
+    return candidates[candidates.length - 1].index;
+  }
+
+  async function adjustListeningFrequency(item, multiplier) {
+    if (!item) return;
+    item.frequency = Math.min(5, Math.max(0.2, Number(item.frequency || 1) * multiplier));
+    if (!els.listeningLibraryModal.classList.contains('hidden')) renderListeningLibrary();
+    try {
+      const data = await api('/api/listening-sentences/' + encodeURIComponent(item.id) + '/frequency', {
+        method: 'POST',
+        body: JSON.stringify({ frequency: item.frequency })
+      });
+      item.frequency = Math.min(5, Math.max(0.2, Number(data.frequency || item.frequency)));
+      if (!els.listeningLibraryModal.classList.contains('hidden')) renderListeningLibrary();
+    } catch (error) {
+      console.warn('Could not persist listening frequency:', error);
+    }
+  }
+
+  function formatListeningFrequency(value) {
+    return Number(Math.min(5, Math.max(0.2, Number(value) || 1))).toFixed(2).replace(/\.00$/, '').replace(/0$/, '') + '×';
+  }
+
+  function moveListening(direction, autoplay, feedback) {
     window.clearTimeout(state.listeningGapTimer);
-    const next = state.listeningIndex + direction;
-    if (next < 0 || next >= state.listeningSentences.length) return;
+    const current = state.listeningSentences[state.listeningIndex];
+    if (feedback === 'less') adjustListeningFrequency(current, 0.75);
+    else if (feedback === 'more') adjustListeningFrequency(current, 1.25);
+    const next = chooseWeightedListeningIndex(direction);
+    if (next < 0 || next >= state.listeningSentences.length || next === state.listeningIndex) return;
     state.listeningIndex = next;
     state.listeningRepetition = 0;
     state.listeningTranslationVisible = false;
+    state.listeningSentenceVisibleOverride = false;
     renderListeningSentence();
     if (autoplay) {
       playCurrentListening();
@@ -4601,7 +4688,6 @@ const APP_JS = String.raw`
 
   async function updateListeningSentenceVisibility(visible) {
     state.settings.listening_show_sentence = Boolean(visible);
-    els.showListeningSentenceInput.checked = state.settings.listening_show_sentence;
     els.listeningShowSentenceSettingInput.checked = state.settings.listening_show_sentence;
     renderListeningSentence();
     persistState();
@@ -4614,6 +4700,12 @@ const APP_JS = String.raw`
     } catch (error) {
       showStatus(error.message, 'error');
     }
+  }
+
+  function toggleCurrentListeningSentenceVisibility(visible) {
+    state.listeningSentenceVisibleOverride = Boolean(visible);
+    els.showListeningSentenceInput.checked = state.listeningSentenceVisibleOverride;
+    renderListeningSentence();
   }
 
   async function updateListeningRandomOrder(enabled) {
@@ -4652,7 +4744,7 @@ const APP_JS = String.raw`
       return '<article class="listening-library-item">' +
         '<div><strong>' + escapeHtml(item.text) + '</strong>' +
         '<p>' + escapeHtml(item.translation || 'Translation not cached yet') + '</p>' +
-        '<p class="listening-library-meta">' + escapeHtml(item.voiceName || item.language) + ' · listened ' + Number(item.listenCount || 0) + ' times</p></div>' +
+        '<p class="listening-library-meta">' + escapeHtml(item.voiceName || item.language) + ' · listened ' + Number(item.listenCount || 0) + ' times · frequency ' + formatListeningFrequency(item.frequency) + '</p></div>' +
         '<button class="ghost-btn select-listening-sentence-btn" data-id="' + escapeHtml(item.id) + '">Select</button>' +
         '</article>';
     }).join('');
@@ -4680,6 +4772,7 @@ const APP_JS = String.raw`
         ? Math.min(state.listeningIndex, state.listeningSentences.length - 1)
         : -1;
       state.listeningTranslationVisible = false;
+      state.listeningSentenceVisibleOverride = false;
       renderListeningSentence();
       if (shouldResume && state.listeningIndex >= 0) playCurrentListening();
       showStatus('Sentence and audio deleted.', 'success');
@@ -5601,9 +5694,6 @@ const APP_JS = String.raw`
     els.listeningAutoplayLimitInput.addEventListener('input', function () {
       els.listeningAutoplayLimitLabel.textContent = String(els.listeningAutoplayLimitInput.value) + ' phrases';
     });
-    els.listeningShowSentenceSettingInput.addEventListener('change', function () {
-      els.showListeningSentenceInput.checked = els.listeningShowSentenceSettingInput.checked;
-    });
     els.newToLearningInput.addEventListener('input', function () {
       els.newToLearningLabel.textContent = String(els.newToLearningInput.value) + ' sees';
     });
@@ -5618,10 +5708,10 @@ const APP_JS = String.raw`
     });
     els.generateListeningBtn.addEventListener('click', function () { generateListeningBatch(false); });
     els.previousListeningBtn.addEventListener('click', function () {
-      moveListening(-1, !els.listeningAudio.paused && !els.listeningAudio.ended);
+      moveListening(-1, !els.listeningAudio.paused && !els.listeningAudio.ended, 'less');
     });
     els.nextListeningBtn.addEventListener('click', function () {
-      moveListening(1, !els.listeningAudio.paused && !els.listeningAudio.ended);
+      moveListening(1, !els.listeningAudio.paused && !els.listeningAudio.ended, 'more');
     });
     els.playPauseListeningBtn.addEventListener('click', toggleListeningPlayback);
     els.replayListeningBtn.addEventListener('click', function () {
@@ -5634,7 +5724,7 @@ const APP_JS = String.raw`
     els.translateListeningBtn.addEventListener('click', toggleListeningTranslation);
     els.deleteListeningBtn.addEventListener('click', deleteCurrentListeningSentence);
     els.showListeningSentenceInput.addEventListener('change', function () {
-      updateListeningSentenceVisibility(els.showListeningSentenceInput.checked);
+      toggleCurrentListeningSentenceVisibility(els.showListeningSentenceInput.checked);
     });
     els.randomListeningOrderInput.addEventListener('change', function () {
       updateListeningRandomOrder(els.randomListeningOrderInput.checked);
@@ -5653,6 +5743,7 @@ const APP_JS = String.raw`
       state.listeningIndex = index;
       state.listeningRepetition = 0;
       state.listeningTranslationVisible = false;
+      state.listeningSentenceVisibleOverride = false;
       renderListeningSentence();
       closeListeningLibrary();
       if (shouldResume) playCurrentListening();
@@ -5670,6 +5761,7 @@ const APP_JS = String.raw`
       const target = event.target.closest('.story-word');
       if (!target || !target.dataset.word) return;
       event.preventDefault();
+      event.stopPropagation();
       target.click();
     });
     els.listeningAudio.addEventListener('ended', handleListeningEnded);
@@ -5780,14 +5872,20 @@ const APP_JS = String.raw`
       }
       if (state.tab === 'listening' && els.listeningCheckin.classList.contains('hidden')) {
         const tagName = String(event.target && event.target.tagName || '').toLowerCase();
-        if (!['input', 'select', 'button', 'audio', 'textarea'].includes(tagName)) {
+        if (!['input', 'select', 'textarea'].includes(tagName)) {
           const shouldResume = !els.listeningAudio.paused && !els.listeningAudio.ended;
           if (event.key === 'ArrowLeft') {
             event.preventDefault();
-            moveListening(-1, shouldResume);
+            moveListening(-1, shouldResume, 'less');
           } else if (event.key === 'ArrowRight') {
             event.preventDefault();
-            moveListening(1, shouldResume);
+            moveListening(1, shouldResume, 'more');
+          } else if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            toggleCurrentListeningSentenceVisibility(!state.listeningSentenceVisibleOverride);
+          } else if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            toggleListeningTranslation();
           } else if (event.key === ' ') {
             event.preventDefault();
             toggleListeningPlayback();
@@ -5927,6 +6025,7 @@ function normalizeListeningSentence(row) {
     voiceName: row.voice_name || row.voiceName || '',
     translation: row.translation || '',
     listenCount: Number(row.listen_count || row.listenCount || 0),
+    frequency: Math.min(5, Math.max(0.2, Number(row.listening_frequency || row.frequency || 1))),
     audioContentType: row.audio_content_type || row.audioContentType || 'audio/mpeg',
     audioUrl: '/api/listening-audio/' + encodeURIComponent(row.id),
     createdAt: row.created_at || row.createdAt || ''
