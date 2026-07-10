@@ -1,0 +1,1 @@
+ALTER TABLE settings ADD COLUMN vocabulary_mix INTEGER NOT NULL DEFAULT 50;

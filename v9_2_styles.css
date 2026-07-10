@@ -1,0 +1,81 @@
+.prose {
+    max-width: 65ch;
+    color: #374151;
+}
+.prose p {
+    margin-bottom: 1.25em;
+    line-height: 1.7;
+}
+.word {
+    cursor: pointer;
+    display: inline-block;
+    padding: 0 2px;
+    margin: 0 2px;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+}
+.word:hover {
+    background-color: #ebf5ff;
+}
+.word.highlighted {
+    background-color: #fef3c7;
+}
+.word.vocab-word {
+    background-color: #e5e7ff;
+}
+
+/* Flashcard styles */
+#flashcardDisplay {
+    background-color: #fffbeb;
+    border: 1px solid #fde68a;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+#flashcardDisplay:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+}
+
+#flashcardWord {
+    font-size: 2rem;
+    color: #1f2937;
+    text-align: center;
+}
+
+#flashcardContext {
+    background-color: #f9fafb;
+    border-radius: 0.5rem;
+    padding: 1rem;
+    font-style: italic;
+    line-height: 1.6;
+}
+
+.flashcard-btn-highlight {
+    animation: pulse 1s;
+}
+
+@keyframes pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(66, 153, 225, 0.5);
+    }
+    70% {
+        box-shadow: 0 0 0 10px rgba(66, 153, 225, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(66, 153, 225, 0);
+    }
+}
+
+/* Keyboard shortcut hints */
+.keyboard-shortcut {
+    display: inline-block;
+    background-color: #f3f4f6;
+    border: 1px solid #d1d5db;
+    border-radius: 0.25rem;
+    padding: 0.15rem 0.4rem;
+    font-size: 0.75rem;
+    font-family: monospace;
+    margin-left: 0.5rem;
+    vertical-align: middle;
+}

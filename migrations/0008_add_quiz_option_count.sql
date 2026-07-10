@@ -1,0 +1,1 @@
+ALTER TABLE settings ADD COLUMN quiz_option_count INTEGER NOT NULL DEFAULT 4;

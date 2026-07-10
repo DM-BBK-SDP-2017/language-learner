@@ -1,0 +1,1 @@
+ALTER TABLE vocabulary ADD COLUMN image_json TEXT NOT NULL DEFAULT '{}';

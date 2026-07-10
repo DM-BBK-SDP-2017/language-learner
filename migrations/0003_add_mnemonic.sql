@@ -1,0 +1,1 @@
+ALTER TABLE vocabulary ADD COLUMN mnemonic TEXT NOT NULL DEFAULT '';

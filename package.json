@@ -1,0 +1,14 @@
+{
+  "name": "language-learner-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node --test",
+    "types": "wrangler types --env-interface Env"
+  },
+  "devDependencies": {
+    "wrangler": "^4.107.0"
+  }
+}
